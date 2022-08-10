@@ -1,24 +1,35 @@
-import {execSync} from 'child_process';
-import {writeFileSync} from 'fs-extra';
-import {resolve as resolvePath} from 'path';
-import {rollup} from 'rollup';
-import rimraf from 'rimraf';
+import { execSync } from "child_process";
+import { resolve as resolvePath, dirname } from "path";
+import { rollup } from "rollup";
+import rimraf from "rimraf";
+import { fileURLToPath } from "url";
 
-import createRollupConfig from './rollup/config';
+import createRollupConfig from "./rollup/config.js";
 
-const root = resolvePath(__dirname, '..');
-const build = resolvePath(root, 'build');
+const __filename = fileURLToPath(import.meta.url);
 
-const intermediateBuild = resolvePath(root, './build-intermediate');
-const entry = resolvePath(intermediateBuild, './index.js');
+const __dirname = dirname(__filename);
 
-compileTypescript('--target ES5');
+const root = resolvePath(__dirname, "..");
+const build = resolvePath(root, "build");
+
+const intermediateBuild = resolvePath(root, "./build-intermediate");
+const entry = resolvePath(intermediateBuild, "./index.js");
+
+
+compileTypescript("--target es2020");
+
 
 Promise.all([
-  runRollup({entry, output: 'react-tiny-virtual-list.es.js', format: 'es'}),
-  runRollup({entry, output: 'react-tiny-virtual-list.cjs.js', format: 'cjs'}),
-  runRollup({entry, output: 'react-tiny-virtual-list.js', format: 'umd'}),
-  runRollup({entry, output: 'react-tiny-virtual-list.min.js', format: 'umd', minify: true}),
+  runRollup({ entry, output: "react-tiny-virtual-list.es.js", format: "es" }),
+  runRollup({ entry, output: "react-tiny-virtual-list.cjs.js", format: "cjs" }),
+  runRollup({ entry, output: "react-tiny-virtual-list.js", format: "umd" }),
+  runRollup({
+    entry,
+    output: "react-tiny-virtual-list.min.js",
+    format: "umd",
+    minify: true,
+  }),
 ])
   .then(cleanIntermediateBuild)
   .catch((error) => {
@@ -29,7 +40,13 @@ Promise.all([
     });
   });
 
-function runRollup({entry, output, format, minify = false, outputDir = build}) {
+function runRollup({
+  entry,
+  output,
+  format,
+  minify = false,
+  outputDir = build,
+}) {
   const config = createRollupConfig({
     input: entry,
     output,
@@ -37,18 +54,22 @@ function runRollup({entry, output, format, minify = false, outputDir = build}) {
     minify,
   });
 
-  return rollup(config)
-    .then((bundle) => bundle.write({
+  return rollup(config).then((bundle) =>
+    bundle.write({
       format,
-      name: 'VirtualList',
+      name: "VirtualList",
       file: resolvePath(outputDir, output),
-    }));
+    })
+  );
 }
 
-function compileTypescript(args = '') {
-  execSync(`./node_modules/.bin/tsc --outDir ${intermediateBuild} --rootDir ./src --baseurl ./src ${args}`, {
-    stdio: 'inherit',
-  });
+function compileTypescript(args = "") {
+  execSync(
+    `./node_modules/.bin/tsc --outDir ${intermediateBuild} --rootDir ./src --baseurl ./src ${args}`,
+    {
+      stdio: "inherit",
+    }
+  );
 }
 
 function cleanIntermediateBuild(callback = () => {}) {
