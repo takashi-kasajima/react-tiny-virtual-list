@@ -1,6 +1,4 @@
-import * as React from 'react';
-import * as PropTypes from 'prop-types';
-import SizeAndPositionManager, {ItemSize} from './SizeAndPositionManager';
+import SizeAndPositionManager, { ItemSize } from "./SizeAndPositionManager";
 import {
   ALIGNMENT,
   DIRECTION,
@@ -10,11 +8,12 @@ import {
   positionProp,
   scrollProp,
   sizeProp,
-} from './constants';
+} from "./constants";
+import React, { useState, useEffect, useRef, ReactNode } from "react";
 
-export {DIRECTION as ScrollDirection} from './constants';
+export { DIRECTION as ScrollDirection } from "./constants";
 
-export type ItemPosition = 'absolute' | 'sticky';
+export type ItemPosition = "absolute" | "sticky";
 
 export interface ItemStyle {
   position: ItemPosition;
@@ -57,7 +56,7 @@ export interface Props {
   stickyIndices?: number[];
   style?: React.CSSProperties;
   width?: number | string;
-  onItemsRendered?({startIndex, stopIndex}: RenderedRows): void;
+  onItemsRendered?({ startIndex, stopIndex }: RenderedRows): void;
   onScroll?(offset: number, event: UIEvent): void;
   renderItem(itemInfo: ItemInfo): React.ReactNode;
 }
@@ -68,348 +67,313 @@ export interface State {
 }
 
 const STYLE_WRAPPER: React.CSSProperties = {
-  overflow: 'auto',
-  willChange: 'transform',
-  WebkitOverflowScrolling: 'touch',
+  overflow: "auto",
+  willChange: "transform",
+  WebkitOverflowScrolling: "touch",
 };
 
 const STYLE_INNER: React.CSSProperties = {
-  position: 'relative',
-  width: '100%',
-  minHeight: '100%',
+  position: "relative",
+  width: "100%",
+  minHeight: "100%",
 };
 
 const STYLE_ITEM: {
-  position: ItemStyle['position'];
-  top: ItemStyle['top'];
-  left: ItemStyle['left'];
-  width: ItemStyle['width'];
+  position: ItemStyle["position"];
+  top: ItemStyle["top"];
+  left: ItemStyle["left"];
+  width: ItemStyle["width"];
 } = {
-  position: 'absolute' as ItemPosition,
+  position: "absolute" as ItemPosition,
   top: 0,
   left: 0,
-  width: '100%',
+  width: "100%",
 };
 
 const STYLE_STICKY_ITEM = {
   ...STYLE_ITEM,
-  position: 'sticky' as ItemPosition,
+  position: "sticky" as ItemPosition,
 };
 
-export default class VirtualList extends React.PureComponent<Props, State> {
-  static defaultProps = {
-    overscanCount: 3,
-    scrollDirection: DIRECTION.VERTICAL,
-    width: '100%',
-  };
+export default function VirtualList(props: Props) {
+  const {
+    estimatedItemSize,
+    height,
+    itemCount,
+    itemSize,
+    onScroll,
+    onItemsRendered,
+    overscanCount = 3,
+    renderItem,
+    scrollOffset,
+    scrollToIndex,
+    scrollToAlignment,
+    scrollDirection = DIRECTION.VERTICAL,
+    stickyIndices,
+    style,
+    width = "100%",
+    ...rest
+  } = props;
+  const [sizeAndPositionManager] = useState(
+    () =>
+      new SizeAndPositionManager({
+        itemCount,
+        itemSizeGetter: itemSizeGetter(itemSize),
+        estimatedItemSize: getEstimatedItemSize(),
+      })
+  );
+  const [offset, setOffset] = useState(
+    scrollOffset ||
+      (scrollToIndex != null && getOffsetForIndex(scrollToIndex)) ||
+      0
+  );
+  const [scrollChangeReason, setScrollChangeReason] = useState(
+    SCROLL_CHANGE_REASON.REQUESTED
+  );
 
-  static propTypes = {
-    estimatedItemSize: PropTypes.number,
-    height: PropTypes.oneOfType([PropTypes.number, PropTypes.string])
-      .isRequired,
-    itemCount: PropTypes.number.isRequired,
-    itemSize: PropTypes.oneOfType([
-      PropTypes.number,
-      PropTypes.array,
-      PropTypes.func,
-    ]).isRequired,
-    onScroll: PropTypes.func,
-    onItemsRendered: PropTypes.func,
-    overscanCount: PropTypes.number,
-    renderItem: PropTypes.func.isRequired,
-    scrollOffset: PropTypes.number,
-    scrollToIndex: PropTypes.number,
-    scrollToAlignment: PropTypes.oneOf([
-      ALIGNMENT.AUTO,
-      ALIGNMENT.START,
-      ALIGNMENT.CENTER,
-      ALIGNMENT.END,
-    ]),
-    scrollDirection: PropTypes.oneOf([
-      DIRECTION.HORIZONTAL,
-      DIRECTION.VERTICAL,
-    ]),
-    stickyIndices: PropTypes.arrayOf(PropTypes.number),
-    style: PropTypes.object,
-    width: PropTypes.oneOfType([PropTypes.number, PropTypes.string]),
-  };
-
-  itemSizeGetter = (itemSize: Props['itemSize']) => {
-    return index => this.getSize(index, itemSize);
-  };
-
-  sizeAndPositionManager = new SizeAndPositionManager({
-    itemCount: this.props.itemCount,
-    itemSizeGetter: this.itemSizeGetter(this.props.itemSize),
-    estimatedItemSize: this.getEstimatedItemSize(),
+  const [currentItem, setCurrentItem] = useState<Partial<Props>>({
+    scrollToIndex,
+    scrollToAlignment,
+    itemCount,
+    itemSize,
+    estimatedItemSize,
   });
 
-  readonly state: State = {
-    offset:
-      this.props.scrollOffset ||
-      (this.props.scrollToIndex != null &&
-        this.getOffsetForIndex(this.props.scrollToIndex)) ||
-      0,
-    scrollChangeReason: SCROLL_CHANGE_REASON.REQUESTED,
-  };
+  function itemSizeGetter(itemSize: Props["itemSize"]) {
+    return (index) => getSize(index, itemSize);
+  }
 
-  private rootNode: HTMLElement;
+  const rootRef = useRef<HTMLDivElement>(null);
 
-  private styleCache: StyleCache = {};
+  let styleCache: StyleCache = {};
 
-  componentDidMount() {
-    const {scrollOffset, scrollToIndex} = this.props;
-    this.rootNode.addEventListener('scroll', this.handleScroll, {
+  useEffect(() => {
+    rootRef.current?.addEventListener("scroll", handleScroll, {
       passive: true,
     });
 
     if (scrollOffset != null) {
-      this.scrollTo(scrollOffset);
+      scrollTo(scrollOffset);
     } else if (scrollToIndex != null) {
-      this.scrollTo(this.getOffsetForIndex(scrollToIndex));
+      scrollTo(getOffsetForIndex(scrollToIndex));
     }
-  }
+    return () => rootRef.current?.removeEventListener("scroll", handleScroll);
+  }, []);
 
-  componentWillReceiveProps(nextProps: Props) {
-    const {
+  useEffect(() => {
+    const scrollPropsHaveChanged =
+      scrollToIndex !== currentItem.scrollToIndex ||
+      scrollToAlignment !== currentItem.scrollToAlignment;
+    const itemPropsHaveChanged =
+      itemCount !== currentItem.itemCount ||
+      itemSize !== currentItem.itemSize ||
+      estimatedItemSize !== currentItem.estimatedItemSize;
+    const item = {
       estimatedItemSize,
       itemCount,
       itemSize,
       scrollOffset,
       scrollToAlignment,
       scrollToIndex,
-    } = this.props;
-    const scrollPropsHaveChanged =
-      nextProps.scrollToIndex !== scrollToIndex ||
-      nextProps.scrollToAlignment !== scrollToAlignment;
-    const itemPropsHaveChanged =
-      nextProps.itemCount !== itemCount ||
-      nextProps.itemSize !== itemSize ||
-      nextProps.estimatedItemSize !== estimatedItemSize;
+    };
 
-    if (nextProps.itemSize !== itemSize) {
-      this.sizeAndPositionManager.updateConfig({
-        itemSizeGetter: this.itemSizeGetter(nextProps.itemSize),
+    if (itemSize !== currentItem.itemSize) {
+      sizeAndPositionManager.updateConfig({
+        itemSizeGetter: itemSizeGetter(itemSize),
       });
     }
 
     if (
-      nextProps.itemCount !== itemCount ||
-      nextProps.estimatedItemSize !== estimatedItemSize
+      itemCount !== currentItem.itemCount ||
+      estimatedItemSize !== estimatedItemSize
     ) {
-      this.sizeAndPositionManager.updateConfig({
-        itemCount: nextProps.itemCount,
-        estimatedItemSize: this.getEstimatedItemSize(nextProps),
+      sizeAndPositionManager.updateConfig({
+        itemCount,
+        estimatedItemSize: getEstimatedItemSize(item),
       });
     }
 
     if (itemPropsHaveChanged) {
-      this.recomputeSizes();
+      recomputeSizes();
     }
 
-    if (nextProps.scrollOffset !== scrollOffset) {
-      this.setState({
-        offset: nextProps.scrollOffset || 0,
-        scrollChangeReason: SCROLL_CHANGE_REASON.REQUESTED,
-      });
+    if (scrollOffset !== currentItem.scrollOffset) {
+      setOffset(scrollOffset || 0);
+      setScrollChangeReason(SCROLL_CHANGE_REASON.REQUESTED);
     } else if (
-      typeof nextProps.scrollToIndex === 'number' &&
+      typeof scrollToIndex === "number" &&
       (scrollPropsHaveChanged || itemPropsHaveChanged)
     ) {
-      this.setState({
-        offset: this.getOffsetForIndex(
-          nextProps.scrollToIndex,
-          nextProps.scrollToAlignment,
-          nextProps.itemCount,
-        ),
-        scrollChangeReason: SCROLL_CHANGE_REASON.REQUESTED,
-      });
+      setOffset(getOffsetForIndex(scrollToIndex, scrollToAlignment, itemCount));
+      setScrollChangeReason(SCROLL_CHANGE_REASON.REQUESTED);
     }
-  }
 
-  componentDidUpdate(_: Props, prevState: State) {
-    const {offset, scrollChangeReason} = this.state;
+    setCurrentItem(item);
+  }, [
+    estimatedItemSize,
+    itemCount,
+    itemSize,
+    scrollOffset,
+    scrollToAlignment,
+    scrollToIndex,
+  ]);
 
-    if (
-      prevState.offset !== offset &&
-      scrollChangeReason === SCROLL_CHANGE_REASON.REQUESTED
-    ) {
-      this.scrollTo(offset);
+  useEffect(() => {
+    if (scrollChangeReason === SCROLL_CHANGE_REASON.REQUESTED) {
+      scrollTo(offset);
     }
+  }, [offset]);
+
+  function getEstimatedItemSize(item?) {
+    if (!item) {
+      item = props;
+    }
+    return (
+      item.estimatedItemSize ||
+      (typeof item.itemSize === "number" && item.itemSize) ||
+      50
+    );
   }
 
-  componentWillUnmount() {
-    this.rootNode.removeEventListener('scroll', this.handleScroll);
-  }
-
-  scrollTo(value: number) {
-    const {scrollDirection = DIRECTION.VERTICAL} = this.props;
-
-    this.rootNode[scrollProp[scrollDirection]] = value;
-  }
-
-  getOffsetForIndex(
+  function getOffsetForIndex(
     index: number,
-    scrollToAlignment = this.props.scrollToAlignment,
-    itemCount: number = this.props.itemCount,
+    newScrollToAlignment = scrollToAlignment,
+    newItemCount: number = itemCount
   ): number {
-    const {scrollDirection = DIRECTION.VERTICAL} = this.props;
+    const { scrollDirection = DIRECTION.VERTICAL } = props;
 
-    if (index < 0 || index >= itemCount) {
+    if (index < 0 || index >= newItemCount) {
       index = 0;
     }
 
-    return this.sizeAndPositionManager.getUpdatedOffsetForIndex({
-      align: scrollToAlignment,
-      containerSize: this.props[sizeProp[scrollDirection]],
-      currentOffset: (this.state && this.state.offset) || 0,
+    return sizeAndPositionManager.getUpdatedOffsetForIndex({
+      align: newScrollToAlignment,
+      containerSize: props[sizeProp[scrollDirection]],
+      currentOffset: offset || 0,
       targetIndex: index,
     });
   }
 
-  recomputeSizes(startIndex = 0) {
-    this.styleCache = {};
-    this.sizeAndPositionManager.resetItem(startIndex);
+  function recomputeSizes(startIndex = 0) {
+    styleCache = {};
+    sizeAndPositionManager.resetItem(startIndex);
   }
 
-  render() {
-    const {
-      estimatedItemSize,
-      height,
-      overscanCount = 3,
-      renderItem,
-      itemCount,
-      itemSize,
-      onItemsRendered,
-      onScroll,
-      scrollDirection = DIRECTION.VERTICAL,
-      scrollOffset,
-      scrollToIndex,
-      scrollToAlignment,
-      stickyIndices,
-      style,
-      width,
-      ...props
-    } = this.props;
-    const {offset} = this.state;
-    const {start, stop} = this.sizeAndPositionManager.getVisibleRange({
-      containerSize: this.props[sizeProp[scrollDirection]] || 0,
-      offset,
-      overscanCount,
-    });
-    const items: React.ReactNode[] = [];
-    const wrapperStyle = {...STYLE_WRAPPER, ...style, height, width};
-    const innerStyle = {
-      ...STYLE_INNER,
-      [sizeProp[scrollDirection]]: this.sizeAndPositionManager.getTotalSize(),
-    };
+  function scrollTo(value: number) {
+    const { scrollDirection = DIRECTION.VERTICAL } = props;
 
+    if (!rootRef.current) return;
+
+    rootRef.current[scrollProp[scrollDirection]] = value;
+  }
+
+  const { start, stop } = sizeAndPositionManager.getVisibleRange({
+    containerSize: props[sizeProp[scrollDirection]] || 0,
+    offset,
+    overscanCount,
+  });
+
+  // const items: React.ReactNode[] = [];
+  const [items, setItems] = useState<ReactNode[]>([]);
+  const wrapperStyle = { ...STYLE_WRAPPER, ...style, height, width };
+  const innerStyle = {
+    ...STYLE_INNER,
+    [sizeProp[scrollDirection]]: sizeAndPositionManager.getTotalSize(),
+  };
+
+  useEffect(() => {
+    const tempItems: ReactNode[] = [];
     if (stickyIndices != null && stickyIndices.length !== 0) {
       stickyIndices.forEach((index: number) =>
-        items.push(
+        tempItems.push(
           renderItem({
             index,
-            style: this.getStyle(index, true),
-          }),
-        ),
+            style: getStyle(index, true),
+          })
+        )
       );
 
       if (scrollDirection === DIRECTION.HORIZONTAL) {
-        innerStyle.display = 'flex';
+        innerStyle.display = "flex";
       }
     }
 
-    if (typeof start !== 'undefined' && typeof stop !== 'undefined') {
+    if (typeof start !== "undefined" && typeof stop !== "undefined") {
       for (let index = start; index <= stop; index++) {
         if (stickyIndices != null && stickyIndices.includes(index)) {
           continue;
         }
 
-        items.push(
+        tempItems.push(
           renderItem({
             index,
-            style: this.getStyle(index, false),
-          }),
+            style: getStyle(index, false),
+          })
         );
       }
 
-      if (typeof onItemsRendered === 'function') {
+      if (typeof onItemsRendered === "function") {
         onItemsRendered({
           startIndex: start,
           stopIndex: stop,
         });
       }
     }
+    setItems(tempItems);
+  }, [
+    stickyIndices,
+    scrollDirection,
+    renderItem,
+    start,
+    stop,
+    onItemsRendered,
+  ]);
 
-    return (
-      <div ref={this.getRef} {...props} style={wrapperStyle}>
-        <div style={innerStyle}>{items}</div>
-      </div>
-    );
-  }
-
-  private getRef = (node: HTMLDivElement): void => {
-    this.rootNode = node;
-  };
-
-  private handleScroll = (event: UIEvent) => {
-    const {onScroll} = this.props;
-    const offset = this.getNodeOffset();
+  function handleScroll(event: UIEvent) {
+    const newOffset = getNodeOffset();
 
     if (
-      offset < 0 ||
-      this.state.offset === offset ||
-      event.target !== this.rootNode
+      newOffset < 0 ||
+      offset === newOffset ||
+      event.target !== rootRef.current
     ) {
       return;
     }
 
-    this.setState({
-      offset,
-      scrollChangeReason: SCROLL_CHANGE_REASON.OBSERVED,
-    });
+    setOffset(newOffset);
+    setScrollChangeReason(SCROLL_CHANGE_REASON.OBSERVED);
 
-    if (typeof onScroll === 'function') {
-      onScroll(offset, event);
+    if (typeof onScroll === "function") {
+      onScroll(newOffset, event);
     }
-  };
-
-  private getNodeOffset() {
-    const {scrollDirection = DIRECTION.VERTICAL} = this.props;
-
-    return this.rootNode[scrollProp[scrollDirection]];
   }
 
-  private getEstimatedItemSize(props = this.props) {
-    return (
-      props.estimatedItemSize ||
-      (typeof props.itemSize === 'number' && props.itemSize) ||
-      50
-    );
+  function getNodeOffset() {
+    const { scrollDirection = DIRECTION.VERTICAL } = props;
+
+    return rootRef.current?.[scrollProp[scrollDirection]];
   }
 
-  private getSize(index: number, itemSize) {
-    if (typeof itemSize === 'function') {
+  function getSize(index: number, itemSize) {
+    if (typeof itemSize === "function") {
       return itemSize(index);
     }
 
     return Array.isArray(itemSize) ? itemSize[index] : itemSize;
   }
 
-  private getStyle(index: number, sticky: boolean) {
-    const style = this.styleCache[index];
+  function getStyle(index: number, sticky: boolean) {
+    const style = styleCache[index];
 
     if (style) {
       return style;
     }
 
-    const {scrollDirection = DIRECTION.VERTICAL} = this.props;
-    const {
-      size,
-      offset,
-    } = this.sizeAndPositionManager.getSizeAndPositionForIndex(index);
+    const { scrollDirection = DIRECTION.VERTICAL } = props;
+    const { size, offset } =
+      sizeAndPositionManager.getSizeAndPositionForIndex(index);
 
-    return (this.styleCache[index] = sticky
+    return (styleCache[index] = sticky
       ? {
           ...STYLE_STICKY_ITEM,
           [sizeProp[scrollDirection]]: size,
@@ -423,4 +387,12 @@ export default class VirtualList extends React.PureComponent<Props, State> {
           [positionProp[scrollDirection]]: offset,
         });
   }
+
+  return (
+    <div ref={rootRef} {...rest} style={wrapperStyle}>
+      <div style={innerStyle} data-testid="container">
+        {items}
+      </div>
+    </div>
+  );
 }

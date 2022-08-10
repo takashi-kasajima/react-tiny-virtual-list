@@ -33,7 +33,7 @@ npm install react-tiny-virtual-list --save
 ES6, CommonJS, and UMD builds are available with each distribution. For example:
 
 ```js
-import VirtualList from 'react-tiny-virtual-list';
+import VirtualList from "react-tiny-virtual-list";
 ```
 
 You can also use a global-friendly UMD build:
@@ -41,8 +41,8 @@ You can also use a global-friendly UMD build:
 ```html
 <script src="react-tiny-virtual-list/umd/react-tiny-virtual-list.js"></script>
 <script>
-var VirtualList = window.VirtualList;
-...
+  var VirtualList = window.VirtualList;
+  ...
 </script>
 ```
 

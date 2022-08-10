@@ -1,16 +1,10 @@
 {
+  "testEnvironment": "jsdom",
   "coverageDirectory": "./coverage/",
   "collectCoverage": true,
   "rootDir": "../..",
-  "roots": [
-    "<rootDir>/src",
-    "<rootDir>/tests"
-  ],
-  "moduleFileExtensions": [
-    "ts",
-    "tsx",
-    "js"
-  ],
+  "roots": ["<rootDir>/src", "<rootDir>/tests"],
+  "moduleFileExtensions": ["ts", "tsx", "js"],
   "testRegex": "[\\w+]\\.test\\.(tsx?|js)$",
   "transform": {
     "\\.tsx?$": "<rootDir>/config/jest/transformers/typescript.js"
